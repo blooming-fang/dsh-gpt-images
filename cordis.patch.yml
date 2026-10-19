@@ -1,0 +1,9 @@
+# dsh-gpt-images bundle layer.
+# Inserts one Host plugin row that observes the model stream of the current
+# session, saves images the model already returned into the session working
+# directory, and appends an inline preview to the assistant reply.
+# `name` must be the full package specifier installed in the profile's
+# node_modules (the loader imports it as a module).
+- insert:
+    - id: gpt-images
+      name: dsh-gpt-images

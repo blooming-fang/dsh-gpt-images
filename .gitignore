@@ -1,0 +1,20 @@
+# Archives and release packages
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.*
+*.tgz
+*.tbz
+*.tbz2
+*.txz
+*.gz
+*.bz2
+*.xz
+
+# Dependencies and local configuration
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
