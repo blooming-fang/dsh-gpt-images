@@ -1,0 +1,2 @@
+# Preserve the native helper byte length for Windows EncodedCommand limits.
+src/windows-reveal.ps1 text eol=lf

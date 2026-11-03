@@ -18,3 +18,6 @@ node_modules/
 .env.*
 !.env.example
 *.log
+
+# Local browser QA artifacts
+.qa/

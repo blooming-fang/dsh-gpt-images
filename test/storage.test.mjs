@@ -69,15 +69,17 @@ test('没有 Web 根地址时降级为纯本地路径说明，不渲染坏图', 
   }
 });
 
-test('同内容在重试窗口内只保存一次', async () => {
+test('同会话同目录重试复用文件，但仍返回可显示的图片结果', async () => {
   const root = await mkdtemp(join(tmpdir(), 'gpt-images-'));
   const cache = join(root, 'cache');
   try {
     const { capture, config } = fixture();
     config.cacheDir = cache;
     const services = { resolveOutputDirectory: async () => join(root, 'project'), cacheDirectory: cache, recent: createRecentSet() };
-    assert.equal((await saveImages(capture, { sessionId: 's1' }, config, services)).length, 1);
-    assert.equal((await saveImages(capture, { sessionId: 's1' }, config, services)).length, 0);
+    const first = await saveImages(capture, { sessionId: 's1' }, config, services);
+    const second = await saveImages(capture, { sessionId: 's1' }, config, services);
+    assert.equal(first.length, 1);
+    assert.deepEqual(second, first);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -111,4 +113,55 @@ test('publicBaseURL 生成绝对链接并保留挂载路径', () => {
   config.publicBaseURL = 'https://dsh.example.com/ui/';
   const markdown = imageMarkdown([{ filename: 'generated-' + 'a'.repeat(32) + '.png', cachePath: 'x', path: 'y' }], config, '');
   assert.match(markdown, /https:\/\/dsh\.example\.com\/ui\/dsh-gpt-images\/generated-/);
+});
+
+test('相同内容跨会话与跨目录均正常交付，不被全局去重吞掉', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gpt-images-'));
+  try {
+    const { capture, config } = fixture();
+    const services = { resolveOutputDirectory: async () => join(root, 'one'), cacheDirectory: join(root, 'cache'), recent: createRecentSet() };
+    const a = await saveImages(capture, { sessionId: 'a' }, config, services);
+    const b = await saveImages(capture, { sessionId: 'b' }, config, services);
+    services.resolveOutputDirectory = async () => join(root, 'two');
+    const c = await saveImages(capture, { sessionId: 'a' }, config, services);
+    assert.equal(b.length, 1); assert.equal(c.length, 1);
+    assert.notEqual(a[0].filename, b[0].filename);
+    assert.ok((await stat(c[0].path)).isFile());
+    assert.equal(c[0].path, join(root, 'two', c[0].filename));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('已删除的原图会重新保存，而非返回失效路径', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gpt-images-'));
+  try {
+    const { capture, config } = fixture();
+    const services = { resolveOutputDirectory: async () => join(root, 'out'), cacheDirectory: join(root, 'cache'), recent: createRecentSet() };
+    const first = await saveImages(capture, { sessionId: 'a' }, config, services);
+    await rm(first[0].path);
+    const second = await saveImages(capture, { sessionId: 'a' }, config, services);
+    assert.equal(second.length, 1); assert.notEqual(second[0].filename, first[0].filename);
+    assert.ok((await stat(second[0].path)).isFile());
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('无图片时不解析目录也不产生误导提示', async () => {
+  const { capture, config } = fixture(); capture.images = [];
+  assert.deepEqual(await saveImages(capture, {}, config, { resolveOutputDirectory() { throw new Error('must not call'); } }), []);
+  assert.equal(capture.warnings.size, 0);
+});
+
+test('远程下载关闭时给出明确提示，不解析或访问地址', async () => {
+  const { capture, config } = fixture(); capture.images = [{ url: 'not a valid URL' }];
+  assert.deepEqual(await saveImages(capture, {}, config, { resolveOutputDirectory: () => 'ignored', cacheDirectory: 'unused' }), []);
+  assert.deepEqual([...capture.warnings], ['远程图片下载已关闭，该图片未保存。']);
+});
+
+test('Markdown 图文分区，空结果不显示标题，非法地址降级', () => {
+  const { config } = fixture();
+  const result = [{ filename: 'generated-' + 'a'.repeat(32) + '.png', path: 'local.png', cachePath: 'cache.png' }];
+  assert.equal(imageMarkdown([], config, ''), '');
+  assert.match(imageMarkdown(result, config, ''), /^---\n\n### 图片结果 · 1 张/);
+  config.publicBaseURL = 'not a URL';
+  const text = imageMarkdown(result, config, '');
+  assert.doesNotMatch(text, /!\[/); assert.match(text, /local.png/);
 });

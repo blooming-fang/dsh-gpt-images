@@ -82,8 +82,9 @@ function expandHome(path) {
 export function outputDirectoryFor(ctx, config, options) {
   const configured = typeof config.outputDir === 'string' && config.outputDir.trim() ? expandHome(config.outputDir.trim()) : '';
   const cwd = resolveSessionCwd(ctx, options);
-  if (!configured && !cwd) return undefined;
-  const base = configured ? (isAbsolute(configured) ? configured : join(cwd ?? process.cwd(), configured)) : cwd;
+  // 相对配置必须有会话 cwd，不能悄悄落到宿主进程工作目录。
+  if (!cwd && (!configured || !isAbsolute(configured))) return undefined;
+  const base = configured ? (isAbsolute(configured) ? configured : join(cwd, configured)) : cwd;
   const subdirectory = typeof config.subdirectory === 'string' ? config.subdirectory.trim() : '';
   return subdirectory ? join(base, subdirectory) : base;
 }

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { resolveSessionCwd, outputDirectoryFor } from '../src/session.js';
 
 function fakeCtx({ sessions = new Map(), agents = new Map(), projections = new Map(), initiator, defaultDirectory } = {}) {
@@ -53,6 +54,30 @@ test('outputDir 显式配置优先；相对路径按会话目录解析', () => {
   assert.equal(outputDirectoryFor(ctx, { outputDir: 'D:/AI/images', subdirectory: '' }, {}), 'D:/AI/images');
   assert.equal(outputDirectoryFor(ctx, { outputDir: 'shots', subdirectory: '' }, {}), join('C:/project', 'shots'));
   assert.equal(outputDirectoryFor(ctx, { outputDir: '', subdirectory: 'gen' }, {}), join('C:/project', 'gen'));
+});
+
+test('会话 cwd 未知时相对 outputDir 不退回宿主进程或默认目录', () => {
+  const ctx = fakeCtx({ defaultDirectory: join(homedir(), 'host-app') });
+  for (const outputDir of ['shots', './shots', '.', '..', '  shots  ']) {
+    for (const subdirectory of ['', 'generated']) {
+      assert.equal(outputDirectoryFor(ctx, { outputDir, subdirectory }, { sessionId: 'unknown-relative-output' }), undefined);
+    }
+  }
+});
+
+test('会话 cwd 未知时显式绝对路径与 home 路径仍可用', () => {
+  const ctx = fakeCtx({});
+  const absolute = join(homedir(), 'images');
+  assert.equal(outputDirectoryFor(ctx, { outputDir: absolute, subdirectory: '' }, {}), absolute);
+  assert.equal(outputDirectoryFor(ctx, { outputDir: '  ' + absolute + '  ', subdirectory: ' generated ' }, {}), join(absolute, 'generated'));
+  assert.equal(outputDirectoryFor(ctx, { outputDir: '~', subdirectory: '' }, {}), homedir());
+  assert.equal(outputDirectoryFor(ctx, { outputDir: '~/images', subdirectory: 'generated' }, {}), join(absolute, 'generated'));
+});
+
+test('相对 outputDir 在已知会话 cwd 下仍按会话目录解析并追加子目录', () => {
+  const cwd = join(homedir(), 'session-project');
+  const ctx = fakeCtx({ sessions: new Map([['relative-output', session('relative-output', cwd)]]) });
+  assert.equal(outputDirectoryFor(ctx, { outputDir: './shots', subdirectory: 'generated' }, { sessionId: 'relative-output' }), join(cwd, 'shots', 'generated'));
 });
 
 test('会话目录不可知且没有 outputDir 时返回 undefined', () => {

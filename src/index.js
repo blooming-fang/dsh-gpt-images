@@ -1,14 +1,19 @@
 import z from '@deepseek-ai/schemastery';
+import { randomBytes } from 'node:crypto';
+import { createRevealHandler, REVEAL_PATH } from './reveal.js';
+import { createReferenceHandler, REFERENCE_PATH } from './reference.js';
 import { installFetchBridge } from './capture.js';
 import { captureStream, DEFAULTS } from './bridge.js';
 import { cacheDirectory, createRecentSet, imageRoute, ROUTE } from './storage.js';
 import { outputDirectoryFor } from './session.js';
+import { galleryScript } from './presentation.js';
 
 export const name = 'dsh-gpt-images';
 export const inject = ['llm', 'webServer'];
 
 export const Config = z.object({
   enabled: z.boolean().default(DEFAULTS.enabled).description('捕获模型已经返回的图片并保存到会话当前目录；不会额外发起生图请求。'),
+  gallery: z.boolean().default(true).description('独立图片结果区：多图横向滚动、点击放大、引用到输入框、打开文件夹与保存路径；关闭后使用普通 Markdown。'),
   outputDir: z.string().default(DEFAULTS.outputDir).description('图片保存目录；留空保存到会话当前目录（相对路径按当前目录解析）。'),
   subdirectory: z.string().default(DEFAULTS.subdirectory).description('在当前目录下再建一级子目录，留空直接保存在当前目录。'),
   cacheDir: z.string().default(DEFAULTS.cacheDir).description('图片预览缓存目录；留空使用 DSH_HOME/generated-images。'),
@@ -93,20 +98,41 @@ export function apply(ctx, rawConfig = {}) {
   config.cacheDir = cacheDirectory(config);
   config.publicBaseURL = validateBaseURL(config.publicBaseURL);
 
+  // Reveal has native side effects: per-plugin secret is injected only into the
+  // authenticated host index, never into public image URLs or Markdown history.
+  const revealToken = randomBytes(32).toString('hex');
+  const localOrigin = () => { try { return ctx.webServer.getOrigin(); } catch { return ''; } };
+  const reveal = createRevealHandler(config, { token: revealToken, origin: localOrigin });
+  const reference = createReferenceHandler(config, { token: revealToken, origins: () => [localOrigin(), config.publicBaseURL || webBaseURL(ctx)] });
+  const images = imageRoute(config);
+  const handler = (req, res) => {
+    const pathname = req.url?.split('?')[0];
+    return pathname === REVEAL_PATH ? reveal(req, res) : pathname === REFERENCE_PATH ? reference(req, res) : images(req, res);
+  };
   ctx.effect(
-    () => ctx.webServer.register({ kind: 'prefix', path: ROUTE, handler: imageRoute(config) }),
+    () => ctx.webServer.register({ kind: 'prefix', path: ROUTE, handler }),
     'gpt-images: inline image route',
   );
 
-  // 本机地址可能随端口变化：仅在未配置固定 publicBaseURL 时注入页面侧的链接修复脚本。
-  if (!config.publicBaseURL) {
-    const script = () => '(' + repairImageLinks.toString() + ')(' + JSON.stringify(webBaseURL(ctx) || '') + ');';
+  // 渐进增强：保留可复制/导出的 Markdown，只增强本插件图片。
+  // 固定 publicBaseURL 也需要画廊，但不应改写远程地址。
+  if (!config.publicBaseURL || config.gallery !== false) {
+    const script = () => {
+      const repair = config.publicBaseURL ? '' : '(' + repairImageLinks.toString() + ')(' + JSON.stringify(webBaseURL(ctx) || '').replaceAll('<', '\\u003c') + ');';
+      let revealEndpoint = '';
+      try { revealEndpoint = new URL(REVEAL_PATH, localOrigin()).href; } catch { /* Not listening yet. */ }
+      let referenceEndpoint = '';
+      let localReferenceEndpoint = '';
+      try { referenceEndpoint = new URL(ROUTE.slice(1) + '/reference', config.publicBaseURL || webBaseURL(ctx) || localOrigin()).href; } catch { /* Not ready. */ }
+      try { localReferenceEndpoint = new URL(REFERENCE_PATH, localOrigin()).href; } catch { /* Not ready. */ }
+      return repair + (config.gallery !== false ? galleryScript({ revealToken, revealEndpoint, referenceToken: revealToken, referenceEndpoint, localReferenceEndpoint, maxReferenceBytes: config.maxImageBytes }) : '');
+    };
     if (typeof ctx.webServer.collectIndexInjections === 'function') {
       ctx.on('webserver/index-inject', (rows) => rows.push({ kind: 'script', text: script(), placement: 'head' }));
     } else {
       ctx.effect(
         () => ctx.webServer.tapIndex((html) => html.replace('</head>', '<script>' + script() + '</script></head>')),
-        'gpt-images: local image link repair',
+        'gpt-images: gallery and local image link repair',
       );
     }
   }

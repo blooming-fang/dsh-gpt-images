@@ -1,6 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { BlockList, isIP } from 'node:net';
-import { request } from 'node:https';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { sniffImage } from './extract.js';
 
 const blockedV4 = new BlockList();
@@ -38,8 +39,14 @@ async function abortableLookup(hostname, signal) {
  * Authorization / Cookie。`allowPrivateImageHosts` 为本地网关场景的显式降级开关。
  */
 export async function downloadImage(source, config, redirects = 0) {
-  const { maxImageBytes, downloadTimeoutMs, allowPrivateImageHosts = false } = config;
-  const signal = AbortSignal.any([...(config.signal ? [config.signal] : []), AbortSignal.timeout(downloadTimeoutMs)]);
+  // 只显式 false 禁用；兼容尚未提供此选项的调用方，并在 URL 解析/DNS/请求之前拒绝。
+  if (config.downloadRemoteImages === false) throw new Error('远程图片下载已禁用。');
+  const signal = AbortSignal.any([...(config.signal ? [config.signal] : []), AbortSignal.timeout(config.downloadTimeoutMs)]);
+  return downloadWithSignal(source, config, redirects, signal);
+}
+
+async function downloadWithSignal(source, config, redirects, signal) {
+  const { maxImageBytes, allowPrivateImageHosts = false } = config;
   signal.throwIfAborted();
   const url = new URL(source);
   const protocolOk = url.protocol === 'https:' || (allowPrivateImageHosts && url.protocol === 'http:');
@@ -56,8 +63,9 @@ export async function downloadImage(source, config, redirects = 0) {
     }
     pinned = addresses[0];
   }
+  const requester = url.protocol === 'http:' ? httpRequest : httpsRequest;
   const result = await new Promise((resolve, reject) => {
-    const req = request(
+    const req = requester(
       url,
       {
         signal,
@@ -100,15 +108,13 @@ export async function downloadImage(source, config, redirects = 0) {
         res.on('end', () => resolve({ bytes: Buffer.concat(chunks) }));
       },
     );
-    const timer = setTimeout(() => req.destroy(new Error('远程图片下载超时。')), downloadTimeoutMs);
-    timer.unref();
-    req.on('close', () => clearTimeout(timer));
     req.on('error', reject);
     req.end();
   });
   if ('redirect' in result) {
     if (!result.redirect || redirects >= 3) throw new Error('远程图片重定向无效或次数过多。');
-    return downloadImage(new URL(result.redirect, url).href, config, redirects + 1);
+    // DNS、每次跳转及响应体共用入口创建的整体超时预算和取消信号。
+    return downloadWithSignal(new URL(result.redirect, url).href, config, redirects + 1, signal);
   }
   return { bytes: result.bytes, ...sniffImage(result.bytes) };
 }

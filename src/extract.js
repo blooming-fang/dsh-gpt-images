@@ -102,6 +102,11 @@ export function extractImages(value) {
     for (const candidate of value.candidates) fromContent(found, candidate?.content?.parts);
   }
 
+  // Anthropic 标准非流式响应只扫描 assistant 输出，避免误收请求里的 user 图片。
+  if (value.type === 'message' && value.role === 'assistant') fromContent(found, value.content);
+  // 图片块在 start 事件中已完整给出；不递归扫描工具输入或 delta 的 JSON。
+  if (value.type === 'content_block_start' && value.content_block?.type === 'image') fromPart(found, value.content_block);
+
   // Images API / 兼容网关的非流式图片结果。
   if (Array.isArray(value.data)) {
     for (const part of value.data) fromPart(found, part);

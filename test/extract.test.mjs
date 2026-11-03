@@ -54,6 +54,56 @@ test('Anthropic: image source base64', () => {
   assert.equal(extractImages({ choices: [{ message: value }] }).length, 1);
 });
 
+test('Anthropic: 标准 assistant message.content 提取 base64 与 URL 图片', () => {
+  const value = {
+    id: 'msg_fixture', type: 'message', role: 'assistant',
+    content: [
+      { type: 'text', text: '图片 https://ignore.invalid/text.png' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG_BASE64 } },
+      { type: 'image', source: { type: 'url', url: 'https://images.invalid/result.png' } },
+    ],
+  };
+  assert.deepEqual(extractImages(value), [
+    { base64: PNG_BASE64, mediaType: 'image/png' },
+    { url: 'https://images.invalid/result.png' },
+  ]);
+});
+
+test('Anthropic: content_block_start 提取图片而非其他事件或工具参数', () => {
+  const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG_BASE64 } };
+  assert.deepEqual(extractImages({ type: 'content_block_start', index: 1, content_block: image }), [
+    { base64: PNG_BASE64, mediaType: 'image/png' },
+  ]);
+  const remote = { type: 'image', source: { type: 'url', url: 'https://images.invalid/stream.png' } };
+  assert.deepEqual(extractImages({ type: 'content_block_start', index: 0, content_block: remote }), [
+    { url: 'https://images.invalid/stream.png' },
+  ]);
+  for (const value of [
+    { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', input: { image } } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(image) } },
+    { type: 'content_block_stop', index: 0, content_block: image },
+    { type: 'message_start', message: { type: 'message', role: 'assistant', content: [image] } },
+    { type: 'content_block_start', index: 0 },
+    { type: 'content_block_start', index: 0, content_block: null },
+  ]) assert.deepEqual(extractImages(value), []);
+});
+
+test('Anthropic: 不扫描 user/request content、工具输入或未知顶层 content', () => {
+  const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG_BASE64 } };
+  for (const value of [
+    { type: 'message', role: 'user', content: [image] },
+    { type: 'message', role: 'system', content: [image] },
+    { role: 'user', content: [image] },
+    { type: 'message', content: [image] },
+    { content: [image] },
+    { messages: [{ role: 'user', content: [image] }] },
+    { type: 'message', role: 'assistant', content: [{ type: 'tool_use', input: { image } }] },
+    { type: 'message', role: 'assistant', content: [{ type: 'tool_result', content: [image] }] },
+    { type: 'message', role: 'assistant', content: { image } },
+    { type: 'message', role: 'assistant', content: [null, 'text', { type: 'text', text: JSON.stringify(image) }] },
+  ]) assert.deepEqual(extractImages(value), []);
+});
+
 test('不扫描请求提示词或无关字段', () => {
   assert.deepEqual(extractImages({ messages: [{ role: 'user', content: '画一张 https://evil.example.com/x.png' }] }), []);
   assert.deepEqual(extractImages({ type: 'message', content: [{ type: 'text', text: 'https://x/y.png' }] }), []);

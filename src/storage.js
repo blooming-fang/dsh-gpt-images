@@ -1,4 +1,4 @@
-import { copyFile, link, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { mkdir, open, rename, stat, unlink } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -41,16 +41,19 @@ export function createRecentSet(ttlMs = 10 * 60 * 1000, limit = 200) {
   const now = () => Date.now();
   return {
     has(hash) {
-      const at = entries.get(hash);
-      if (at === undefined) return false;
-      if (now() - at > ttlMs) {
+      const entry = entries.get(hash);
+      if (entry === undefined) return false;
+      if (now() - entry.at > ttlMs) {
         entries.delete(hash);
         return false;
       }
       return true;
     },
-    add(hash) {
-      entries.set(hash, now());
+    get(hash) {
+      return this.has(hash) ? entries.get(hash).result : undefined;
+    },
+    add(hash, result) {
+      entries.set(hash, { at: now(), result });
       if (entries.size > limit) entries.delete(entries.keys().next().value);
     },
   };
@@ -63,6 +66,7 @@ export function createRecentSet(ttlMs = 10 * 60 * 1000, limit = 200) {
  */
 export async function saveImages(capture, options, config, services) {
   const results = [];
+  if (!capture.images.length) return results;
   const savedHashes = new Set();
   let primaryDirectory;
   try {
@@ -74,6 +78,10 @@ export async function saveImages(capture, options, config, services) {
   const cacheDir = services.cacheDirectory;
   for (const candidate of capture.images) {
     options.signal?.throwIfAborted();
+    if (candidate.url && config.downloadRemoteImages === false) {
+      capture.warn('远程图片下载已关闭，该图片未保存。');
+      continue;
+    }
     let image;
     try {
       image = candidate.url
@@ -87,8 +95,21 @@ export async function saveImages(capture, options, config, services) {
     }
     options.signal?.throwIfAborted();
     const digest = createHash('sha256').update(image.bytes).digest('hex');
-    if (savedHashes.has(digest) || services.recent.has(digest)) continue;
-    savedHashes.add(digest);
+    if (savedHashes.has(digest)) continue;
+    // Scope reuse to this session AND destination. Reuse the result, never silently
+    // discard it: an image-only retry still needs a visible successful result.
+    const recentKey = JSON.stringify([options.sessionId ?? '', primaryDirectory ? resolve(primaryDirectory) : '', resolve(cacheDir), digest]);
+    const previous = services.recent.get?.(recentKey);
+    if (previous && (!primaryDirectory || previous.path)) {
+      const paths = [...new Set([previous.cachePath, previous.path].filter(Boolean))];
+      const existing = await Promise.all(paths.map((path) => stat(path).then((s) => s.isFile()).catch(() => false)));
+      options.signal?.throwIfAborted();
+      if (paths.length && existing.every(Boolean)) {
+        savedHashes.add(digest);
+        results.push({ ...previous });
+        continue;
+      }
+    }
 
     const filename = 'generated-' + randomBytes(16).toString('hex') + '.' + image.ext;
     const result = { filename, mediaType: image.mediaType, bytes: image.bytes.length, sha256: digest };
@@ -103,7 +124,8 @@ export async function saveImages(capture, options, config, services) {
       capture.warn('图片已生成，但插件缓存写入失败，会话里可能无法预览。');
     }
 
-    // 主副本：会话当前目录。
+    // 主副本：会话当前目录。原子写完成后再响应取消，不留下半张图片。
+    options.signal?.throwIfAborted();
     if (primaryDirectory) {
       try {
         await makeDirectory(primaryDirectory);
@@ -115,14 +137,16 @@ export async function saveImages(capture, options, config, services) {
           result.path = path;
         }
       } catch {
-        capture.warn('图片无法写入会话当前目录，已仅保存在插件缓存目录。');
+        capture.warn('图片无法写入会话当前目录，请检查目录权限。');
       }
     }
     if (!result.cachePath && !result.path) {
       capture.warn('图片保存失败，未写入任何位置。');
       continue;
     }
-    services.recent.add(digest);
+    options.signal?.throwIfAborted();
+    savedHashes.add(digest);
+    services.recent.add(recentKey, { ...result });
     results.push(result);
   }
   return results;
@@ -141,10 +165,15 @@ export function imageMarkdown(results, config, baseURL) {
   const base = config.publicBaseURL || baseURL || '';
   const absolute = (filename, suffix = '') => {
     if (!base) return '';
-    const root = base.endsWith('/') ? base : base + '/';
-    return new URL(ROUTE.slice(1) + '/' + filename + suffix, root).href;
+    try {
+      const root = base.endsWith('/') ? base : base + '/';
+      const url = new URL(ROUTE.slice(1) + '/' + filename + suffix, root);
+      return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+    } catch { return ''; }
   };
-  return results
+  if (!results.length) return '';
+  const heading = '---\n\n### 图片结果 · ' + results.length + ' 张\n\n';
+  return heading + results
     .map((image, index) => {
       const label = '生成的图片 ' + (index + 1);
       const url = absolute(image.filename);

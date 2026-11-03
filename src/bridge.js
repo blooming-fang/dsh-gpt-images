@@ -3,6 +3,7 @@ import { saveImages, imageMarkdown } from './storage.js';
 
 export const DEFAULTS = Object.freeze({
   enabled: true,
+  gallery: true,
   providers: [],
   models: [],
   outputDir: '',
