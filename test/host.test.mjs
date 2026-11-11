@@ -114,3 +114,62 @@ test('本机操作凭据仅随索引注入，每次插件实例独立生成且�
   }
   assert.notEqual(tokens[0], tokens[1]);
 });
+
+
+function toolHost() {
+  const h = host(true); const definitions = new Map();
+  const tools = {
+    get: (name) => definitions.get(name),
+    register(definition) {
+      definitions.set(definition.name, definition);
+      h.ctx.effect(() => () => definitions.delete(definition.name));
+    },
+  };
+  h.ctx.inject = (required, callback) => {
+    assert.deepEqual(required, ['tools']);
+    callback({ ...h.ctx, tools });
+  };
+  return { ...h, definitions };
+}
+
+test('新宿主同时注册两个图片工具与原捕获/画廊，卸载时全部释放', async () => {
+  const h = toolHost(); const before = globalThis.fetch;
+  try {
+    apply(h.ctx, { imageApiBaseURL: 'http://localhost:8317', imageApiKey: 'fixture-do-not-inject' });
+    assert.deepEqual([...h.definitions.keys()], ['generate_image', 'edit_image']);
+    assert.ok(h.events.has('llm/stream')); assert.equal(h.routes.length, 1);
+    const rows = []; h.events.get('webserver/index-inject')(rows);
+    assert.match(rows[0].text, /installImageGallery/);
+    assert.equal(rows[0].text.includes('fixture-do-not-inject'), false);
+    for (const definition of h.definitions.values()) {
+      assert.equal(JSON.stringify(definition.parameters).includes('fixture-do-not-inject'), false);
+      assert.ok(definition.output.schema); assert.equal(typeof definition.output.render, 'function');
+    }
+  } finally { await h.dispose(); }
+  assert.equal(h.definitions.size, 0); assert.equal(h.routes.length, 0); assert.equal(globalThis.fetch, before);
+});
+
+test('只关闭主动图片工具不影响旧捕获；关闭画廊不影响主动工具', async () => {
+  const disabledTools = toolHost();
+  try {
+    apply(disabledTools.ctx, { imageToolsEnabled: false });
+    assert.equal(disabledTools.definitions.size, 0);
+    assert.equal(disabledTools.routes.length, 1); assert.ok(disabledTools.events.has('llm/stream'));
+    const rows = []; disabledTools.events.get('webserver/index-inject')(rows); assert.match(rows[0].text, /installImageGallery/);
+  } finally { await disabledTools.dispose(); }
+  const noGallery = toolHost();
+  try {
+    apply(noGallery.ctx, { gallery: false });
+    assert.equal(noGallery.definitions.size, 2); assert.ok(noGallery.events.has('llm/stream'));
+    const rows = []; noGallery.events.get('webserver/index-inject')(rows);
+    assert.doesNotMatch(rows[0].text, /installImageGallery/); assert.match(rows[0].text, /repairImageLinks/);
+  } finally { await noGallery.dispose(); }
+});
+
+test('彻底禁用插件时不注册新工具，重载不会残留重复工具', async () => {
+  const off = toolHost(); apply(off.ctx, { enabled: false });
+  assert.equal(off.definitions.size, 0); await off.dispose();
+  for (let i = 0; i < 2; i++) {
+    const h = toolHost(); apply(h.ctx); assert.equal(h.definitions.size, 2); await h.dispose(); assert.equal(h.definitions.size, 0);
+  }
+});

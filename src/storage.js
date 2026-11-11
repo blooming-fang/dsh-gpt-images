@@ -161,26 +161,31 @@ function displayPath(path) {
  * 聊天渲染器只接受绝对 http(s) 图片地址，因此这里必须用运行时的 Web 根地址；
  * baseURL 为空时降级为纯本地路径说明（不渲染坏图）。
  */
-export function imageMarkdown(results, config, baseURL) {
+export function imagePreviewURL(image, config, baseURL, download = false) {
   const base = config.publicBaseURL || baseURL || '';
-  const absolute = (filename, suffix = '') => {
-    if (!base) return '';
-    try {
-      const root = base.endsWith('/') ? base : base + '/';
-      const url = new URL(ROUTE.slice(1) + '/' + filename + suffix, root);
-      return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
-    } catch { return ''; }
-  };
+  if (!base) return '';
+  try {
+    const root = base.endsWith('/') ? base : base + '/';
+    const url = new URL(ROUTE.slice(1) + '/' + image.filename, root);
+    if (!['http:', 'https:'].includes(url.protocol)) return '';
+    // A display hint only: native reveal independently validates path and image bytes.
+    if (config.embedImagePath && (image.path || image.cachePath)) url.searchParams.set('dgi_path', displayPath(image.path || image.cachePath));
+    if (download) url.searchParams.set('download', '1');
+    return url.href;
+  } catch { return ''; }
+}
+
+export function imageMarkdown(results, config, baseURL) {
   if (!results.length) return '';
   const heading = '---\n\n### 图片结果 · ' + results.length + ' 张\n\n';
   return heading + results
     .map((image, index) => {
       const label = '生成的图片 ' + (index + 1);
-      const url = absolute(image.filename);
+      const url = imagePreviewURL(image, config, baseURL);
       const lines = [];
       if (image.cachePath && url) {
         lines.push('![' + label + '](<' + url + '>)');
-        lines.push('[下载原图](<' + absolute(image.filename, '?download=1') + '>) · 已保存到 `' + displayPath(image.path ?? image.cachePath) + '`');
+        lines.push('[下载原图](<' + imagePreviewURL(image, config, baseURL, true) + '>) · 已保存到 `' + displayPath(image.path ?? image.cachePath) + '`');
       } else {
         lines.push(label + (image.cachePath ? '（预览地址不可用）' : '（预览不可用）'));
         if (image.path) lines.push('已保存到 `' + displayPath(image.path) + '`');

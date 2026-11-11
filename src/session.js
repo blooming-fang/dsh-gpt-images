@@ -80,8 +80,12 @@ function expandHome(path) {
  * 返回 undefined 表示目录不可知——此时只保存到插件缓存目录，避免误写到应用目录。
  */
 export function outputDirectoryFor(ctx, config, options) {
+  return outputDirectoryAt(config, resolveSessionCwd(ctx, options));
+}
+
+/** 同一目录策略供异步 workingDirectory.ensure 的独立图片工具复用。 */
+export function outputDirectoryAt(config, cwd) {
   const configured = typeof config.outputDir === 'string' && config.outputDir.trim() ? expandHome(config.outputDir.trim()) : '';
-  const cwd = resolveSessionCwd(ctx, options);
   // 相对配置必须有会话 cwd，不能悄悄落到宿主进程工作目录。
   if (!cwd && (!configured || !isAbsolute(configured))) return undefined;
   const base = configured ? (isAbsolute(configured) ? configured : join(cwd, configured)) : cwd;

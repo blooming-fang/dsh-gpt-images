@@ -7,12 +7,20 @@ import { captureStream, DEFAULTS } from './bridge.js';
 import { cacheDirectory, createRecentSet, imageRoute, ROUTE } from './storage.js';
 import { outputDirectoryFor } from './session.js';
 import { galleryScript } from './presentation.js';
+import { IMAGE_API_DEFAULTS } from './image-api.js';
+import { registerImageTools } from './image-tools.js';
 
 export const name = 'dsh-gpt-images';
 export const inject = ['llm', 'webServer'];
 
 export const Config = z.object({
-  enabled: z.boolean().default(DEFAULTS.enabled).description('捕获模型已经返回的图片并保存到会话当前目录；不会额外发起生图请求。'),
+  enabled: z.boolean().default(DEFAULTS.enabled).description('启用图片捕获、画廊及独立图片工具；只有显式调用图片工具时才主动请求生图。'),
+  imageToolsEnabled: z.boolean().default(IMAGE_API_DEFAULTS.imageToolsEnabled).description('注册 generate_image / edit_image；关闭后仍保留原有被动捕获和画廊功能。'),
+  imageApiBaseURL: z.string().default(IMAGE_API_DEFAULTS.imageApiBaseURL).description('独立 Image API 地址，默认 http://localhost:8317；根地址自动补 /v1，也可填完整 /v1 前缀。不是会话预览 publicBaseURL。'),
+  imageApiKey: z.string().role('secret').default('').description('图片服务 Bearer API Key；留空读取 imageApiKeyEnv 指定的环境变量。不自动读取聊天模型凭据。'),
+  imageApiKeyEnv: z.string().default(IMAGE_API_DEFAULTS.imageApiKeyEnv).description('图片服务 API Key 环境变量名，默认 DSH_IMAGE_API_KEY；需由宿主进程继承。'),
+  imageModel: z.string().default(IMAGE_API_DEFAULTS.imageModel).description('独立工具默认图片模型 ID；可改为本地服务实际提供的模型，例如 gpt-image-2.6-sunburst。'),
+  imageTimeoutMs: z.natural().min(1000).max(900000).default(IMAGE_API_DEFAULTS.imageTimeoutMs).description('单次图片接口请求超时（含响应读取），默认 5 分钟；不自动重试。'),
   gallery: z.boolean().default(true).description('独立图片结果区：多图横向滚动、点击放大、引用到输入框、打开文件夹与保存路径；关闭后使用普通 Markdown。'),
   outputDir: z.string().default(DEFAULTS.outputDir).description('图片保存目录；留空保存到会话当前目录（相对路径按当前目录解析）。'),
   subdirectory: z.string().default(DEFAULTS.subdirectory).description('在当前目录下再建一级子目录，留空直接保存在当前目录。'),
@@ -93,7 +101,7 @@ function repairImageLinks(hostOrigin) {
 }
 
 export function apply(ctx, rawConfig = {}) {
-  const config = { ...DEFAULTS, ...rawConfig };
+  const config = { ...DEFAULTS, ...IMAGE_API_DEFAULTS, ...rawConfig };
   if (!config.enabled) return;
   config.cacheDir = cacheDirectory(config);
   config.publicBaseURL = validateBaseURL(config.publicBaseURL);
@@ -125,7 +133,7 @@ export function apply(ctx, rawConfig = {}) {
       let localReferenceEndpoint = '';
       try { referenceEndpoint = new URL(ROUTE.slice(1) + '/reference', config.publicBaseURL || webBaseURL(ctx) || localOrigin()).href; } catch { /* Not ready. */ }
       try { localReferenceEndpoint = new URL(REFERENCE_PATH, localOrigin()).href; } catch { /* Not ready. */ }
-      return repair + (config.gallery !== false ? galleryScript({ revealToken, revealEndpoint, referenceToken: revealToken, referenceEndpoint, localReferenceEndpoint, maxReferenceBytes: config.maxImageBytes }) : '');
+      return repair + (config.gallery !== false ? galleryScript({ revealToken, revealEndpoint, referenceToken: revealToken, referenceEndpoint, localReferenceEndpoint, maxReferenceBytes: config.maxImageBytes, cacheDirectory: config.cacheDir }) : '');
     };
     if (typeof ctx.webServer.collectIndexInjections === 'function') {
       ctx.on('webserver/index-inject', (rows) => rows.push({ kind: 'script', text: script(), placement: 'head' }));
@@ -138,6 +146,13 @@ export function apply(ctx, rawConfig = {}) {
   }
 
   const recent = createRecentSet();
+  // Optional service injection preserves capture-only hosts and follows service disposal/reload.
+  if (config.imageToolsEnabled && typeof ctx.inject === 'function') {
+    ctx.inject(['tools'], (toolCtx) => registerImageTools(toolCtx, config, {
+      cacheDirectory: config.cacheDir, recent,
+      baseURL: () => config.publicBaseURL || webBaseURL(ctx),
+    }));
+  }
   const bridge = installFetchBridge();
   ctx.effect(() => () => bridge.dispose(), 'gpt-images: scoped fetch capture');
 

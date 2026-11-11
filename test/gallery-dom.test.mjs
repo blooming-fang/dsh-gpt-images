@@ -28,7 +28,7 @@ function setup(html, { dialog = true, nativeOptions = {}, pageURL = 'http://loca
 }
 
 test('分组只在单个Markdown内，原React节点与正文保留，多图单一横向列表', async () => {
-  const t = setup('<div id="a"><p id="prose">正文</p><hr><h3>图片结果 · 2 张</h3>' + source('a') + source('b',2) + '</div><div id="b">' + source('c') + '</div><div><p><img src="' + url('d') + '" alt="普通图片"></p></div>');
+  const t = setup('<div id="a"><p id="prose">正文</p><hr><h3>图片结果 · 2 张</h3>' + source('a') + source('b',2) + '</div><div id="b">' + source('c') + '</div><div><p><img src="' + 'http://localhost/ordinary.png' + '" alt="普通图片"></p></div>');
   try {
     const original = t.d.querySelector('#a img');
     await t.settle();
@@ -61,15 +61,15 @@ test('追加图片保留现有卡片，并能从React替换/移除中恢复', as
   } finally { t.dispose(); }
 });
 
-test('仅修改alt也撤销增强，不吞metadata追加正文', async () => {
+test('修改alt保留插件画廊，不吞metadata追加正文', async () => {
   const t = setup('<div id="root">' + source('a') + source('b',2) + '</div>');
   try {
     await t.settle(); const root = t.d.querySelector('#root'); const first = root.querySelector('img');
-    first.alt = '普通图片'; await t.settle(); assert.equal(first.hasAttribute('data-dgi-source'), false);
+    first.alt = '普通图片'; await t.settle(); assert.equal(first.hasAttribute('data-dgi-source'), true);
     const metadata = [...root.querySelectorAll('p')].find((p) => p.textContent.includes('b.png'));
     metadata.append(t.d.createTextNode(' 额外说明需要保留')); await t.settle();
     assert.equal(metadata.hasAttribute('data-dgi-source'), false);
-    assert.equal(root.querySelectorAll('.dgi-card').length, 1);
+    assert.equal(root.querySelectorAll('.dgi-card').length, 2);
   } finally { t.dispose(); }
 });
 

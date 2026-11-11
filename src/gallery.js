@@ -12,7 +12,7 @@ export function installImageGallery(options = {}, referenceFactory) {
   document.head.append(style);
   const controllers = new Map();
   const queued = new Set();
-  const sourceSelector = 'img[alt^="生成的图片 "][src*="/dsh-gpt-images/"]';
+  const sourceSelector = 'img[src*="/dsh-gpt-images/"]';
   const filename = /\/dsh-gpt-images\/generated-[a-f0-9]{32}\.(png|jpg|webp|gif)$/;
   const aborter = new AbortController();
   const events = { signal: aborter.signal };
@@ -145,7 +145,7 @@ export function installImageGallery(options = {}, referenceFactory) {
     return node;
   }
   function validSource(image) {
-    if (image.closest('.dgi-gallery,.dgi-viewer') || !/^生成的图片 \d+$/.test(image.alt)) return false;
+    if (image.closest('.dgi-gallery,.dgi-viewer')) return false;
     try {
       const url = new URL(image.src);
       return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && filename.test(url.pathname);
@@ -164,14 +164,25 @@ export function installImageGallery(options = {}, referenceFactory) {
       const paragraph = image.closest('p');
       const next = paragraph.nextElementSibling;
       let metadata;
-      let path = '';
+      const imageURL = new URL(image.src);
+      const leaf = imageURL.pathname.split('/').pop();
+      const pathHint = imageURL.searchParams.get('dgi_path');
+      const validPath = (value) => typeof value === 'string' && value.length <= 8192 && ![...value].some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127) &&
+        (value.startsWith('/') || (value[1] === ':' && ['/', String.fromCharCode(92)].includes(value[2]))) &&
+        value.replaceAll(String.fromCharCode(92), '/').endsWith('/' + leaf);
+      let path = validPath(pathHint) ? pathHint : '';
+      let cacheOnly = false;
+      if (!path && typeof options.cacheDirectory === 'string') {
+        const fallback = options.cacheDirectory.replaceAll(String.fromCharCode(92), '/').replace(/[/]+$/, '') + '/' + leaf;
+        if (validPath(fallback)) { path = fallback; cacheOnly = true; }
+      }
       if (next?.tagName === 'P') {
         const anchor = [...next.querySelectorAll('a[href]')].find((a) => {
           try { const u = new URL(a.href); const v = new URL(image.src); return u.origin === v.origin && u.pathname === v.pathname && u.searchParams.get('download') === '1'; } catch { return false; }
         });
         const code = next.querySelector('code');
         if (anchor && anchor.textContent.trim() === '下载原图' && code) {
-          path = code.textContent;
+          path = code.textContent; cacheOnly = false;
           // Hide only the exact plugin paragraph; appended user/model prose stays visible.
           if (next.textContent.trim() === '下载原图 · 已保存到 ' + path) metadata = next;
         }
@@ -180,7 +191,7 @@ export function installImageGallery(options = {}, referenceFactory) {
       url.searchParams.delete('download');
       const download = new URL(url);
       download.searchParams.set('download', '1');
-      items.push({ url: url.href, download: download.href, label: image.alt, path, image, paragraph, metadata, format: url.pathname.split('.').pop().toUpperCase() });
+      items.push({ url: url.href, download: download.href, label: image.alt.trim() || '生成的图片 ' + (items.length + 1), path, cacheOnly, image, paragraph, metadata, format: url.pathname.split('.').pop().toUpperCase() });
     }
     return items;
   }
@@ -312,7 +323,7 @@ export function installImageGallery(options = {}, referenceFactory) {
     body.append(heading, actions);
     if (item.path) {
       const details = el('details', 'dgi-details');
-      details.append(el('summary', '', '已保存 · 查看位置'), el('code', 'dgi-path', item.path));
+      details.append(el('summary', '', item.cacheOnly ? '缓存副本 · 查看位置' : '已保存 · 查看位置'), el('code', 'dgi-path', item.path));
       details.append(button('复制路径', 'copy', () => copyPath(controller, item.path, details)));
       body.append(details);
     }
@@ -386,7 +397,7 @@ export function installImageGallery(options = {}, referenceFactory) {
     const active = new Set(items.map((item) => item.url));
     for (const [url, entry] of controller.cards) if (!active.has(url)) { entry.card.remove(); controller.cards.delete(url); }
     for (const [index, item] of items.entries()) {
-      const fingerprint = JSON.stringify([item.path, item.label, index]);
+      const fingerprint = JSON.stringify([item.path, item.cacheOnly, item.label, index]);
       let entry = controller.cards.get(item.url);
       if (!entry || entry.fingerprint !== fingerprint) {
         const card = makeCard(item, index, controller);

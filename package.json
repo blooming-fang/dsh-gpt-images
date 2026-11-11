@@ -1,7 +1,7 @@
 {
   "name": "dsh-gpt-images",
-  "version": "0.2.6",
-  "description": "解决 DSH 对接 GPT 生图模型后，已生成图片无法在会话中返回显示的问题；自动保存图片并提供预览、引用和本机定位。",
+  "version": "0.3.3",
+  "description": "DSH 图片捕获、保存与画廊插件；新增独立 Images API 生图和编辑工具，保留聊天模型并支持本地转发服务。",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -26,18 +26,26 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/index.js && node --check src/bridge.js && node --check src/extract.js && node --check src/capture.js && node --check src/storage.js && node --check src/download.js && node --check src/session.js && node --check src/gallery.js && node --check src/presentation.js && node --check src/reveal.js && node --check src/reference.js && node --check src/composer-reference.js"
+    "check": "node --check src/index.js && node --check src/bridge.js && node --check src/extract.js && node --check src/capture.js && node --check src/storage.js && node --check src/download.js && node --check src/session.js && node --check src/gallery.js && node --check src/presentation.js && node --check src/reveal.js && node --check src/reference.js && node --check src/composer-reference.js && node --check src/image-api.js && node --check src/image-tools.js"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
     "@deepseek-ai/dsh-llm": ">=0.2.0-rc.1 <0.3.0",
-    "@deepseek-ai/dsh-host-webserver": ">=0.2.0-rc.1 <0.3.0"
+    "@deepseek-ai/dsh-host-webserver": ">=0.2.0-rc.1 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.1 <0.3.0",
+    "@deepseek-ai/dsh-fs": ">=0.2.0-rc.1 <0.3.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-llm": {
       "optional": true
     },
     "@deepseek-ai/dsh-host-webserver": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-fs": {
       "optional": true
     }
   },

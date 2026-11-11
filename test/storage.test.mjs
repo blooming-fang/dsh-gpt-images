@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { saveImages, imageMarkdown, createRecentSet, FILE_NAME } from '../src/storage.js';
+import { saveImages, imageMarkdown, imagePreviewURL, createRecentSet, FILE_NAME } from '../src/storage.js';
 
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -106,6 +106,21 @@ test('会话目录不可写时仍保留缓存副本并给出提示', async () =>
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('工具图片URL携带编码后的保存路径，下载链接保留hint且被动捕获默认不变', () => {
+  const filename = 'generated-' + 'a'.repeat(32) + '.png';
+  const image = { filename, path: 'D:/输出 空格/' + filename, cachePath: 'C:/cache/' + filename };
+  const config = { embedImagePath: true };
+  const url = new URL(imagePreviewURL(image, config, 'http://localhost:55467/'));
+  assert.equal(url.searchParams.get('dgi_path'), image.path);
+  assert.equal(url.pathname, '/dsh-gpt-images/' + filename);
+  assert.equal(url.searchParams.get('download'), null);
+  const download = new URL(imagePreviewURL(image, config, 'http://localhost:55467/', true));
+  assert.equal(download.searchParams.get('download'), '1');
+  assert.equal(download.searchParams.get('dgi_path'), image.path);
+  assert.equal(new URL(imagePreviewURL({ ...image, path: undefined }, config, 'http://localhost/')).searchParams.get('dgi_path'), image.cachePath);
+  assert.equal(new URL(imagePreviewURL(image, {}, 'http://localhost/')).searchParams.get('dgi_path'), null);
 });
 
 test('publicBaseURL 生成绝对链接并保留挂载路径', () => {
