@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GPT 图片",
+    "description": "把模型已经返回却进不了会话的图片自动保存到会话目录并在回复内预览，另提供 generate_image / edit_image 生图与改图工具。"
+  }
+}

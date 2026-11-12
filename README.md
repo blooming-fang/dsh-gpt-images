@@ -21,6 +21,17 @@
 - 「引用」「打开文件夹」和「原图」操作（画廊模式）；
 - 图片在本机上的完整路径（默认就是**会话当前目录**）。
 
+## 0.3.4：插件图标与中英文元数据
+
+插件管理器的卡片、列表行与详情页现在显示本插件自己的图标和本地化标题、描述，不再只显示包名 `dsh-gpt-images`。
+
+- **图标**：包根 `./icon.svg`，用 `package.json` 的 `icon` 字段声明。宿主把它读成 data URL 后按 36 单位画布渲染（卡片 36 px、列表行 30 px、详情页 36 px），因此同一份文件在深浅色主题和三种尺寸下都清晰；体积约 1.3 KB，远低于宿主 256 KiB 上限。
+- **图形含义**：蓝色渐变画框加太阳与山＝图片与画廊；右上角紫色星芒＝独立生图 / 改图工具。
+- **中英文元数据**：`locale/en.json` 与 `locale/zh.json` 的 `meta.title` / `meta.description`。中文界面显示「GPT 图片」，英文界面显示 “GPT images”；只提供这两种语言，其他语言按 `en` 显示。
+- **不改行为**：`icon`、`locale` 只是展示元数据，捕获、画廊、引用、打开文件夹与两个图片工具的配置和请求都没有变化。
+
+`files` 与 `exports` 已包含 `icon.svg` 和 `locale/*.json`，`npm pack` 打包后宿主才能解析 `<包名>/locale/<语言>.json`。图标缺失、超出 256 KiB 或不是 SVG/PNG/JPEG/WebP 时，宿主保留文字、只在元信息里报诊断，不会导致插件加载失败。修改图标或文案后需**重载插件或重启 DSH，再刷新页面**。
+
 ## 0.3.3：GIF 默认帧参数与尺寸规则
 
 两个工具显式指定 `output_format: gif` 时，都会执行以下规则：
@@ -224,7 +235,7 @@ dsh plugin --profile web add "D:/plugin/deepseek-harness/plugins/dsh-gpt-images"
 
 # 方式二：打包后安装
 npm pack --ignore-scripts
-dsh plugin --profile web add "D:/plugin/deepseek-harness/plugins/dsh-gpt-images/dsh-gpt-images-0.3.3.tgz"
+dsh plugin --profile web add "D:/plugin/deepseek-harness/plugins/dsh-gpt-images/dsh-gpt-images-0.3.4.tgz"
 ```
 
 安装后重启 / 重载当前 dsh 实例，新会话即可生效。`plugins` 面板或

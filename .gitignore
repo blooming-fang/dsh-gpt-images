@@ -21,3 +21,6 @@ node_modules/
 
 # Local browser QA artifacts
 .qa/
+
+# Native addon cache the desktop runtime materializes in the working copy
+undefined/

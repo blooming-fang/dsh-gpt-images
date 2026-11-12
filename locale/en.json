@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GPT images",
+    "description": "Save the images a model already returned but the session dropped, preview them inside the reply, and generate or edit images through an OpenAI-compatible Images API."
+  }
+}

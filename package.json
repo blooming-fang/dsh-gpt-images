@@ -1,7 +1,8 @@
 {
   "name": "dsh-gpt-images",
-  "version": "0.3.3",
-  "description": "DSH 图片捕获、保存与画廊插件；新增独立 Images API 生图和编辑工具，保留聊天模型并支持本地转发服务。",
+  "version": "0.3.4",
+  "description": "Save the images a model already returned but the session dropped, preview them inside the reply, and generate or edit images with an OpenAI-compatible Images API.",
+  "icon": "./icon.svg",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -11,11 +12,14 @@
   "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
     "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
     "README.md",
     "LICENSE"
   ],
